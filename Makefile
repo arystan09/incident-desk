@@ -23,3 +23,11 @@ check:
 	uv run --locked ruff check .
 	uv run --locked mypy
 	uv run --locked pytest
+
+.PHONY: test-integration migrate
+
+test-integration:
+	uv run --locked pytest -m integration tests/integration
+
+migrate:
+	uv run --locked alembic upgrade head

@@ -3,13 +3,13 @@
 Current milestone: **F1 — Durable investigation foundation**.
 Statuses: `todo | in_progress | blocked | in_review | done`.
 Owner verification is required to move work from `in_review` to `done`.
-Only F1-01 is in scope for the current implementation.
+Current task: F1-02 persistence only. Do not proceed to F1-03.
 
 ## F1 — Durable investigation foundation
 
 ### F1-01: Package, quality checks, documentation, Docker, and CI
 
-- Status: in_review
+- Status: done
 - Dependencies: none.
 - Scope: src package, typed settings, FastAPI factory and liveness, isolated tests,
   uv lock, Ruff/mypy/pytest, Makefile, documentation, API-only Docker/Compose, CI.
@@ -29,18 +29,43 @@ Only F1-01 is in scope for the current implementation.
   `make check` was not run: make is not installed; all four equivalent uv commands
   passed. Hosted GitHub Actions has not run. Both action SHAs were verified with
   `git ls-remote` against official release tags. Git is not initialized, so no
-  branch or commit was created. Owner review remains pending.
+  branch or commit was created at that time.
+- Owner acceptance (2026-09-25): the owner explicitly accepted the reported local
+  F1-01 checks as sufficient to proceed. Docker build/startup remains untested;
+  hosted GitHub Actions has not run. Acceptance does not close those gaps.
+  Foundation history was subsequently established as commit 57e75eb on main.
 
 ### F1-02: PostgreSQL run/job/step models and migrations
 
-- Status: todo
-- Dependencies: F1-01 owner verification.
-- Scope: introduce SQLAlchemy 2, Alembic, PostgreSQL, typed persistence boundaries,
-  tenant-scoped run/job/step schemas, constraints, and database readiness.
-- Acceptance: migrations apply on an empty real PostgreSQL database; upgrade and
-  downgrade behavior is tested; invalid relationships and required constraints are
-  rejected; readiness reports unavailable database honestly; no model calls needed.
-- Evidence: none; not implemented.
+- Status: blocked
+- Dependencies: F1-01 (accepted by owner).
+- Scope: SQLAlchemy 2 synchronous sessions, psycopg 3, explicit engine/transaction
+  ownership, run/job/step constraints and indexes, Alembic migrations, disposable
+  PostgreSQL integration tests, optional Compose database, and CI integration job.
+  Database readiness is deferred until an API operation uses persistence; no fake
+  readiness route or public run endpoint is introduced.
+- Acceptance: migrations apply to an empty real PostgreSQL database, model metadata
+  matches, downgrade/base/upgrade round-trip succeeds only in a disposable database;
+  records and JSONB round-trip; status/counter/FK/uniqueness constraints and restricted
+  deletion reject invalid operations; a failed unit of work rolls back run and job;
+  liveness works without a database; explicit integration requests fail if unavailable.
+- Evidence (2026-09-25, Python 3.12.14): locked sync succeeded; Ruff linting and
+  formatting verification passed; mypy passed for 8 application source files;
+  `uv run --locked pytest` passed 25 unit tests with 16 integration cases deselected.
+  The existing Starlette/HTTPX deprecation warning remains. `uv build` produced a
+  wheel and source archive, inspected to exclude credentials and local caches.
+  `uv run --locked alembic upgrade head --sql` rendered the complete PostgreSQL DDL
+  successfully; this is not evidence of PostgreSQL execution.
+- Blocker: `uv run --locked pytest -m integration tests/integration --maxfail=1`
+  collected 16 cases and failed at setup with the actionable missing
+  TEST_DATABASE_URL message (no tests silently skipped). No running PostgreSQL
+  service/listener or Docker is available. The local PostgreSQL 17 directory has
+  postgres/psql executables but lacks initdb and pg_ctl, so it cannot provision a
+  fresh isolated server using those tools. No system service or OS setting changed.
+- Unverified: actual upgrade/downgrade, live schema comparison, SQL constraints,
+  persistence, and rollback against PostgreSQL. Docker build/startup and both hosted
+  CI jobs remain unrun. Set up the dedicated local test role/URL using README.md,
+  run all 16 integration cases, and only then mark this task in_review.
 
 ### F1-03: Tenant-scoped API authentication and idempotent run creation
 
@@ -106,4 +131,3 @@ All tasks below are todo; F2 follows verified F1.
 | F4-03 | todo | Release packaging and operational runbook. |
 | F4-04 | todo | Held-out evaluation artifacts. |
 | F4-05 | todo | Clean-clone walkthrough and recorded-demo instructions. |
-

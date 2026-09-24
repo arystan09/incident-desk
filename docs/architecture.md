@@ -8,6 +8,34 @@ validated with pydantic-settings. The API starts without a database or model key
 No readiness claim is made. Tests, static checks, container configuration, and CI
 form the foundation; the capabilities below are planned, not implemented.
 
+## Implemented in F1-02 (PostgreSQL execution pending)
+
+The persistence package defines runs, jobs, and run_steps using SQLAlchemy 2,
+psycopg 3, and PostgreSQL JSONB. The initial Alembic revision creates named status
+and nonnegative-counter constraints, one job per run, and unique step numbers per
+run. UUID tenant IDs are required data, not proof of authenticated tenancy. Foreign
+keys restrict deletion of referenced runs; there are no cascade relationships.
+
+The run index `(tenant_id, created_at, id)` prepares tenant listing with stable
+ordering; primary keys serve individual run lookup. It does not enforce tenant
+isolation. A partial queued-job index `(next_attempt_at, id) WHERE status='queued'`
+prepares due-job selection; no claiming logic exists. The job run uniqueness and
+step `(run_id, step_no)` uniqueness also support loading a run's job and steps.
+Other fields are deliberately not indexed without a query requirement.
+
+An explicit engine scope owns pool disposal, and each synchronous transaction
+helper commits or rolls back and closes its session. No connection opens on import,
+no migration runs on startup, and the HTTP app still has no database dependency.
+Future async handlers must offload blocking work rather than run it on the event
+loop. Timestamps use TIMESTAMPTZ; initial values come from PostgreSQL. ORM updates
+maintain updated_at; direct SQL callers must do so explicitly. State versions and
+lease fields only prepare later recovery work. See [ADR 0002](adr/0002-synchronous-persistence.md).
+
+There is still no readiness endpoint. F1-02 intentionally implements persistence
+only; database-aware API lifecycle/readiness will be added when an API operation
+uses the database. Real PostgreSQL execution remains blocked locally; integration
+CI is configured but has not run. Offline checks are not database evidence.
+
 ## Planned boundaries
 
 ```mermaid
@@ -29,7 +57,8 @@ The API and worker will be separate process roles in one modular application.
 Domain rules will remain independent of HTTP, SQLAlchemy persistence, and provider
 adapters. PostgreSQL will be the durable source of truth for tenant-scoped runs,
 jobs, steps, immutable proposals, approvals, local tickets, and audit records.
-SQLAlchemy 2 and Alembic will be introduced when persistence is implemented.
+SQLAlchemy 2 synchronous persistence and Alembic are now implemented in F1-02;
+the remaining tables and end-to-end guarantees below are future work.
 
 The API will authenticate callers, derive tenant context, authorize every operation,
 and create idempotent runs. The worker will claim PostgreSQL jobs with bounded

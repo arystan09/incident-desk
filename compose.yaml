@@ -1,0 +1,8 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      INCIDENT_DESK_SERVICE_NAME: ${INCIDENT_DESK_SERVICE_NAME:-incident-desk}
+      INCIDENT_DESK_ENVIRONMENT: ${INCIDENT_DESK_ENVIRONMENT:-development}

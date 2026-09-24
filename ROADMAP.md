@@ -1,0 +1,109 @@
+# Roadmap
+
+Current milestone: **F1 — Durable investigation foundation**.
+Statuses: `todo | in_progress | blocked | in_review | done`.
+Owner verification is required to move work from `in_review` to `done`.
+Only F1-01 is in scope for the current implementation.
+
+## F1 — Durable investigation foundation
+
+### F1-01: Package, quality checks, documentation, Docker, and CI
+
+- Status: in_review
+- Dependencies: none.
+- Scope: src package, typed settings, FastAPI factory and liveness, isolated tests,
+  uv lock, Ruff/mypy/pytest, Makefile, documentation, API-only Docker/Compose, CI.
+- Acceptance: locked Python 3.12 install succeeds; formatting, lint, typing, and
+  tests pass; liveness returns HTTP 200 and exactly `{"status":"ok"}` without
+  PostgreSQL or model credentials; configuration rejects invalid environments;
+  Docker smoke test runs if Docker is available; unrun checks are disclosed.
+- Evidence (2026-09-25, Windows, Python 3.12.14, uv 0.12.18):
+  `uv sync --locked` succeeded; `uv run --locked ruff format --check .`,
+  `uv run --locked ruff check .`, and `uv run --locked mypy` passed (5 application
+  source files); `uv run --locked pytest` passed all 8 tests. One upstream
+  Starlette warning deprecates its HTTPX test-client integration. `uv build`
+  produced an sdist and wheel; archive contents exclude caches and local tooling.
+  A temporary Uvicorn subprocess served `/health/live` over loopback with HTTP 200
+  and exactly `{"status":"ok"}`, and was stopped after verification.
+  Docker build/start/health checks were not run: Docker is not installed.
+  `make check` was not run: make is not installed; all four equivalent uv commands
+  passed. Hosted GitHub Actions has not run. Both action SHAs were verified with
+  `git ls-remote` against official release tags. Git is not initialized, so no
+  branch or commit was created. Owner review remains pending.
+
+### F1-02: PostgreSQL run/job/step models and migrations
+
+- Status: todo
+- Dependencies: F1-01 owner verification.
+- Scope: introduce SQLAlchemy 2, Alembic, PostgreSQL, typed persistence boundaries,
+  tenant-scoped run/job/step schemas, constraints, and database readiness.
+- Acceptance: migrations apply on an empty real PostgreSQL database; upgrade and
+  downgrade behavior is tested; invalid relationships and required constraints are
+  rejected; readiness reports unavailable database honestly; no model calls needed.
+- Evidence: none; not implemented.
+
+### F1-03: Tenant-scoped API authentication and idempotent run creation
+
+- Status: todo
+- Dependencies: F1-02.
+- Scope: authenticated tenant context, authorization, request validation,
+  idempotency constraints, and run creation/status endpoints.
+- Acceptance: same tenant/key/input returns the same run, including concurrent
+  requests; different input conflicts; cross-tenant access is denied; callers cannot
+  set trusted tenant identity through a request body.
+- Evidence: none; not implemented.
+
+### F1-04: Worker claims, leases, fencing, and fake-provider execution
+
+- Status: todo
+- Dependencies: F1-02, F1-03.
+- Scope: separate worker role, PostgreSQL job claims, lease renewal/expiry, fenced
+  state transitions, step persistence, and minimal deterministic fake execution.
+- Acceptance: concurrent workers do not own the same valid lease; a stale worker
+  cannot commit after replacement; restart can resume persisted work; no database
+  transaction spans a provider call; default execution is offline.
+- Evidence: none; not implemented.
+
+### F1-05: End-to-end fixture workflow and worker restart tests
+
+- Status: todo
+- Dependencies: F1-03, F1-04.
+- Scope: reproducible synthetic fixture workflow from authenticated request through
+  durable fake execution and terminal status, plus real PostgreSQL restart tests.
+- Acceptance: fixture reaches the expected terminal state; killing and restarting
+  the worker resumes safely; duplicate requests preserve run identity; interrupted
+  progress and stale commits are covered without paid APIs.
+- Evidence: none; not implemented.
+
+## F2 — Agent and human review
+
+All tasks below are todo; F2 follows verified F1.
+
+| ID | Status | Task |
+| --- | --- | --- |
+| F2-01 | todo | Four typed evidence tools: metrics, logs, deployments, runbooks. |
+| F2-02 | todo | Narrow model adapter and scripted fake provider. |
+| F2-03 | todo | Bounded agent loop and evidence-reference validation. |
+| F2-04 | todo | Immutable proposals, reviewer approval, and atomic local actions. |
+| F2-05 | todo | Minimal review interface. |
+
+## F3 — Reliability and evaluation
+
+| ID | Status | Task |
+| --- | --- | --- |
+| F3-01 | todo | Crash and stale-worker recovery tests. |
+| F3-02 | todo | Cancellation, deadlines, and bounded retries. |
+| F3-03 | todo | Structured logs, tracing, metrics, and usage accounting. |
+| F3-04 | todo | Tenant admission limits and security regression tests. |
+| F3-05 | todo | Versioned synthetic evaluation dataset and baselines. |
+
+## F4 — Reproducible release
+
+| ID | Status | Task |
+| --- | --- | --- |
+| F4-01 | todo | Development-set experiments. |
+| F4-02 | todo | Load and dependency-failure tests. |
+| F4-03 | todo | Release packaging and operational runbook. |
+| F4-04 | todo | Held-out evaluation artifacts. |
+| F4-05 | todo | Clean-clone walkthrough and recorded-demo instructions. |
+

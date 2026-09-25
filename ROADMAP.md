@@ -67,6 +67,26 @@ Current task: F1-02 persistence only. Do not proceed to F1-03.
   CI jobs remain unrun. Set up the dedicated local test role/URL using README.md,
   run all 16 integration cases, and only then mark this task in_review.
 
+- Verification/setup follow-up: checked Get-Command for docker/psql/pg_ctl/initdb,
+  matching Windows services, standard Docker/initdb/pg_ctl executable paths, and
+  `Test-NetConnection -ComputerName 127.0.0.1 -Port 5432 -InformationLevel Quiet`.
+  No tools on PATH or matching services were found; executable-path checks and
+  the port probe returned false. TEST_DATABASE_URL remains unset. No PostgreSQL
+  integration command was repeated merely to reproduce missing configuration.
+- Inspected, not executed: Compose's PostgreSQL 17 `db` service, `database` profile,
+  localhost port 5432 default, environment example, fixture database creation and
+  cleanup, and CI configuration. README now supplies one Windows Compose path,
+  explicit dedicated-role creation with LOGIN/CREATEDB and maintenance CONNECT,
+  password prompting, and the integration command. These setup instructions are
+  not evidence that Docker or PostgreSQL ran. The manual prerequisite is a running
+  Docker Desktop Linux-container engine with the Compose CLI available.
+- Follow-up checks executed: `uv run --locked ruff format --check .` passed;
+  `uv run --locked ruff check .` passed; `uv run --locked mypy` passed (8 source
+  files); `uv run --locked pytest` passed 25 unit tests, with 16 integration cases
+  deselected and the existing Starlette/HTTPX warning. `git diff --check` passed.
+  No implementation assertions were changed. F1-02 remains blocked; Docker
+  build/startup and hosted CI remain unverified.
+
 ### F1-03: Tenant-scoped API authentication and idempotent run creation
 
 - Status: todo

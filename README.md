@@ -1,187 +1,154 @@
 # Incident Desk
 
-Incident Desk is a personal Applied AI engineering portfolio project for a clearly
-labeled synthetic service environment. It is intended to become a resumable agent
-that gathers incident evidence, produces an evidence-backed conclusion or abstains,
-and proposes a local ticket update that requires human approval before application.
-There are no claimed customers, production deployments, or measured business results.
+Incident Desk is an Applied AI engineering portfolio project for a clearly labeled
+synthetic service environment. The intended workflow is to investigate an incident,
+gather evidence, return a supported conclusion or abstain, and propose a local
+ticket update. Applying that exact proposal will require human approval.
 
-Current status: **F1 foundation with persistence implementation; PostgreSQL verification pending**. Implemented today: an installable Python
-package, validated configuration, an application factory, process liveness, isolated
-unit tests, quality commands, a container definition, and GitHub Actions CI.
-F1-02 adds synchronous SQLAlchemy/psycopg persistence, an Alembic migration,
-and a separate real-PostgreSQL integration suite. These database paths have not
-yet executed successfully on this machine.
+**The API foundation and PostgreSQL persistence code are implemented. PostgreSQL
+integration tests have not yet run.**
 
-## Local setup
+## What works today
 
-Prerequisites: Python 3.12 and uv (the checked tool version is 0.12.18).
-uv can download Python 3.12 with `uv python install 3.12`. Docker Engine/Desktop
-with Compose is optional. GNU make is optional.
+The FastAPI application exposes `GET /health/live` and validates environment
+settings. It starts without PostgreSQL or a model API key. The persistence package
+contains synchronous SQLAlchemy 2/psycopg 3 models for runs, jobs, and steps, explicit
+transaction helpers, and an Alembic migration. Database behavior still needs real
+PostgreSQL verification.
 
-```sh
+Investigation endpoints, authentication, workers, evidence tools, model calls,
+approval, and a review interface are planned. See the [roadmap](ROADMAP.md),
+[architecture](docs/architecture.md), and [persistence ADR](docs/adr/0002-synchronous-persistence.md).
+
+## Run the API
+
+Use Python 3.12 and uv (checked with uv 0.12.18). From the repository root:
+
+```powershell
 uv python install 3.12
 uv sync --locked
 uv run --locked uvicorn incident_desk.main:create_app --factory --reload --host 127.0.0.1 --port 8000
 ```
 
-Optionally copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell).
-Settings use the `INCIDENT_DESK_` prefix. `SERVICE_NAME` defaults to `incident-desk`;
-`ENVIRONMENT` defaults to `development` and accepts `development`, `test`, or
-`production`. A nonempty service name is required. Process environment overrides
-`.env`. Unrelated settings are ignored. The environment label does not enable
-authentication or otherwise make this application production-ready.
+In another PowerShell terminal, run `curl.exe http://127.0.0.1:8000/health/live`.
+On other shells use `curl`. Expect HTTP 200 and `{"status":"ok"}`. Stop with Ctrl+C.
 
-In another terminal:
+Settings use the `INCIDENT_DESK_` prefix. The service name defaults to
+`incident-desk`; environment defaults to `development` and accepts `development`,
+`test`, or `production`. Shell settings override an optional `.env` file. See
+[.env.example](.env.example) for the database URL and timeout settings.
 
-```sh
-curl http://127.0.0.1:8000/health/live
-```
+## Checks
 
-On Windows use `curl.exe http://127.0.0.1:8000/health/live`.
-Expected: HTTP 200 with `{"status":"ok"}`. Stop the server with Ctrl+C.
-No PostgreSQL server or model API key is required.
+These commands work in PowerShell without make:
 
-## Quality commands (also work in Windows PowerShell)
-
-```sh
+```powershell
 uv run --locked ruff format --check .
 uv run --locked ruff check .
 uv run --locked mypy
 uv run --locked pytest
 ```
 
-Run all four commands to reproduce `make check`; they do not rewrite source files.
-To format intentionally, use `uv run --locked ruff format .`.
-`make install`, `make dev`, `make lint`, `make format`, `make typecheck`,
-`make test`, and `make check` wrap the uv commands above. Tests run offline using
-a temporary working directory and remove prefixed environment variables to isolate
-settings from the developer's `.env` and process configuration.
+`make check` runs the same four checks. Unit tests are offline and isolated from
+local application settings; PostgreSQL cases are excluded by default. Use
+`uv run --locked ruff format .` to apply formatting and `uv build` to build the
+package. Other Makefile targets: `install`, `dev`, `lint`, `format`, `typecheck`,
+`test`, `migrate`, and `test-integration`.
 
-## Docker
+## PostgreSQL on Windows: Docker Compose
 
-```sh
+**Manual prerequisite:** install and start Docker Desktop with its Linux-container
+engine. `docker version` must show a running server, and `docker compose version`
+must succeed. The steps below were checked against the repository configuration;
+they have not been executed in this environment.
+
+1. Prepare local configuration without replacing an existing `.env`:
+
+   ```powershell
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+   ```
+
+   Edit `.env` and set a development-only `POSTGRES_PASSWORD`. Keep the example's
+   `POSTGRES_USER=incident_desk_dev`, `POSTGRES_DB=incident_desk`, and
+   `POSTGRES_PORT=5432` for the commands below. Never commit `.env`.
+
+2. Start only the database service:
+
+   ```powershell
+   docker compose -p incident-desk-f1 --profile database up -d --wait db
+   ```
+
+   This uses `postgres:17`, binds `127.0.0.1:5432`, and keeps data in the project's
+   named `postgres_data` volume. An empty password prevents initial database setup.
+   Changing `.env` later does not change credentials in an existing volume.
+
+3. Create the dedicated test role before setting `TEST_DATABASE_URL`:
+
+   ```powershell
+   docker compose -p incident-desk-f1 --profile database exec db psql -U incident_desk_dev -d postgres
+   ```
+
+   In psql, inspect `\du incident_desk_test_admin`. If the role is absent, create it:
+
+   ```sql
+   CREATE ROLE incident_desk_test_admin LOGIN CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+   GRANT CONNECT ON DATABASE postgres TO incident_desk_test_admin;
+   ```
+
+   Set its separate test password using `\password incident_desk_test_admin`, then
+   exit with `\q`. The prompt avoids putting the password in SQL history. If the
+   role already exists, inspect its privileges rather than recreating it.
+   The fixtures need login, connection to `postgres`, and permission to create
+   databases. Ownership of each new test database permits migration and cleanup;
+   superuser and role-management privileges are unnecessary.
+
+4. Export the test URL in PowerShell without typing the password into command history:
+
+   ```powershell
+   $testCredential = Get-Credential -UserName incident_desk_test_admin -Message 'Enter the test role password'
+   $encodedPassword = [uri]::EscapeDataString($testCredential.GetNetworkCredential().Password)
+   $env:TEST_DATABASE_URL = "postgresql+psycopg://incident_desk_test_admin:${encodedPassword}@127.0.0.1:5432/postgres"
+   Remove-Variable testCredential, encodedPassword
+   uv run --locked pytest -m integration tests/integration
+   ```
+
+   Equivalent: `make test-integration`. Do not print the URL. The fixture reads it
+   from the process environment, not `.env`, and rejects non-loopback hosts,
+   different role/database names, and URL query overrides. Each test creates a
+   unique `incident_desk_test_<uuid>` database, runs migrations and assertions, then
+   drops only that database. It never resets the supplied maintenance database or
+   reads the application URL. The 16 cases include upgrade/downgrade/upgrade,
+   schema comparison, constraints, JSONB round-trips, and atomic rollback.
+
+To migrate the separate local application database, set `INCIDENT_DESK_DATABASE_URL`
+in `.env` using the commented example and your percent-encoded development password,
+then run `uv run --locked alembic upgrade head` (or `make migrate`). Migrations do
+not run on API startup.
+
+**Destructive downgrade:** `alembic downgrade base` removes the initial schema and
+its data. Do not run it on an ordinary application database. The integration suite
+runs that operation only inside newly created disposable databases. Interrupted
+tests may leave a test database for manual inspection.
+
+Stop the project database with `docker compose -p incident-desk-f1 --profile database stop db`.
+This retains the data volume. No volume-reset command is needed for the test suite.
+
+## API container (optional)
+
+```powershell
 docker compose -p incident-desk-f1 up --build -d --wait api
-curl http://127.0.0.1:8000/health/live
-docker compose -p incident-desk-f1 down
+curl.exe http://127.0.0.1:8000/health/live
+docker compose -p incident-desk-f1 stop api
 ```
 
-Use `curl.exe` on Windows. The command above runs only the API and binds host port 8000 to
-loopback. The image uses Python 3.12, locked runtime dependencies, a non-root user,
-and a standard-library HTTP liveness check. `.env` is excluded from the build.
-The base image tags can receive upstream updates; the Python dependency lock does
-not pin the entire operating system image.
+The API container runs as a non-root user and uses a standard-library liveness
+check. It does not start the optional database service.
 
-## Design and current limitations
+## Current limitations
 
-See [architecture](docs/architecture.md), [initial ADR](docs/adr/0001-initial-architecture.md),
-and [roadmap](ROADMAP.md). Persistence is implemented but locally unverified.
-There is no authentication, worker, model
-provider, evidence tool, approval workflow, UI, or telemetry yet. Liveness only
-checks that the HTTP process responds; database readiness is not implemented.
-Docker execution and hosted CI require their respective runtimes; local verification
-evidence and any unrun checks are recorded in the roadmap. This is not a
-production-ready incident system.
-
-## PostgreSQL development setup (PowerShell)
-
-Use PostgreSQL 17. Install Docker Desktop yourself and start its Linux-container
-engine, or use an existing PostgreSQL server with `psql` available. This project
-does not install services or change Windows settings. For the existing Windows
-installation, add its `bin` folder to your terminal PATH only if needed:
-
-```powershell
-$env:PATH = 'C:\Program Files\PostgreSQL\17\bin;' + $env:PATH
-```
-
-Copy `.env.example` to `.env` if you have not already done so. Set a development-only
-`POSTGRES_PASSWORD` there. Do not commit `.env`. The database image refuses an empty
-password; leaving it blank does not prevent the API-only command from working.
-Compose profiles keep PostgreSQL optional. Start just this project's database:
-
-```powershell
-docker compose -p incident-desk-f1 --profile database up -d --wait db
-```
-
-This creates the `incident_desk` database with the configured development role,
-binds port 5432 to loopback, and persists data in a project-scoped named volume.
-Changing `.env` credentials does not change roles in an already initialized volume.
-For an existing PostgreSQL installation, have its administrator create a dedicated
-local database and role instead; do not point this project at production data.
-
-Set `INCIDENT_DESK_DATABASE_URL` in `.env` (or the shell) to your database, with a
-percent-encoded password. The only supported driver scheme is `postgresql+psycopg`:
-
-```powershell
-$env:INCIDENT_DESK_DATABASE_URL = 'postgresql+psycopg://incident_desk_dev:YOUR_ENCODED_PASSWORD@127.0.0.1:5432/incident_desk'
-uv sync --locked
-uv run --locked alembic upgrade head
-```
-
-`make migrate` runs the same upgrade. Run migrations explicitly from the checkout;
-API startup never runs them. `INCIDENT_DESK_DATABASE_CONNECT_TIMEOUT` defaults to
-5 seconds, and `INCIDENT_DESK_DATABASE_STATEMENT_TIMEOUT_MS` to 10000 milliseconds.
-The app still serves liveness with no URL or with an unreachable database.
-
-## Real PostgreSQL integration tests
-
-Fast `uv run --locked pytest` excludes the `integration` marker. The explicit suite
-fails with setup instructions if PostgreSQL or test configuration is unavailable.
-It never falls back to SQLite and does not read TEST_DATABASE_URL from `.env`.
-
-Create a dedicated local test role once in your development PostgreSQL instance.
-For the Compose defaults, open psql with:
-
-```powershell
-docker compose -p incident-desk-f1 --profile database exec db psql -U incident_desk_dev -d postgres
-```
-
-Or use `psql -h 127.0.0.1 -U YOUR_LOCAL_ADMIN -d postgres` for an existing server.
-In psql, run the following only if this dedicated role does not already exist;
-`\password` prompts without putting its value in SQL history:
-
-```text
-CREATE ROLE incident_desk_test_admin LOGIN CREATEDB;
-\password incident_desk_test_admin
-\q
-```
-
-The test role only needs LOGIN and CREATEDB. Do not reuse application/production
-credentials. Export the URL in the test shell:
-
-```powershell
-$env:TEST_DATABASE_URL = 'postgresql+psycopg://incident_desk_test_admin:YOUR_ENCODED_TEST_PASSWORD@127.0.0.1:5432/postgres'
-uv run --locked pytest -m integration tests/integration
-```
-
-Equivalent: `make test-integration`. Tests accept only a loopback host, that exact
-test username, database `postgres`, and no URL query parameters. The URL is used
-as a maintenance connection to CREATE a unique `incident_desk_test_<uuid>` database
-for each test. Only those newly created databases are migrated and dropped. No
-supplied database is reset. Each test database is dropped after connections close;
-an interrupted test may leave a disposable database for manual inspection.
-
-**Destructive migration warning:** the initial downgrade removes all three tables
-and all their data. Do not run `alembic downgrade base` on a normal development,
-shared, or production database. The integration suite tests downgrade/base/upgrade
-only inside its newly created disposable database; there is no general reset target.
-
-Stop only the services started for this project (data volume is retained):
-
-```powershell
-docker compose -p incident-desk-f1 --profile database stop db
-```
-
-**Destructive volume reset warning:** this next command permanently deletes this
-project's PostgreSQL data and removes its containers. Use only for a disposable
-local environment after checking the project name and backing up anything needed:
-
-```powershell
-docker compose -p incident-desk-f1 --profile database down --volumes
-```
-
-The integration CI job uses its own PostgreSQL 17 service and disposable-only
-credentials. Local PostgreSQL integration execution is blocked: no running server,
-no initdb/pg_ctl tools, and no TEST_DATABASE_URL are available. Docker build/startup
-and hosted GitHub Actions have still not run. See [ADR 0002](docs/adr/0002-synchronous-persistence.md)
-for transaction ownership and migration decisions, and the roadmap for check evidence.
+Liveness reports only that the HTTP process responds. There is no database
+readiness endpoint, tenant isolation, worker recovery, or approval enforcement yet.
+The 25 unit tests pass; real PostgreSQL behavior, Docker build/startup, and hosted
+GitHub Actions remain unverified. F1-02 stays blocked until all PostgreSQL checks
+pass. [ROADMAP.md](ROADMAP.md) records executed checks separately from setup
+instructions. Contribution rules are in [AGENTS.md](AGENTS.md).

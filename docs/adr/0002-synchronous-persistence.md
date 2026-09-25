@@ -15,7 +15,8 @@ opens no connection. The scope disposes the pool on every exit path. Each
 `transaction(engine)` owns a session and one transaction: commit on success,
 rollback on exception (including failed flush/commit), then close. Do not commit
 inside the helper or hold the scope across a provider call. No generic repository
-framework is introduced. The liveness-only API does not create an engine yet.
+framework is introduced. F1-03 adds lazy API-lifespan engine ownership; liveness
+still does not connect. See ADR 0003 for authenticated request transactions.
 Connect, pool checkout, and statement timeouts are bounded. Credentials use a
 redacted setting; SQL parameter logging is disabled. Do not log raw URLs, settings
 secret values, or driver exception details in future request handlers.

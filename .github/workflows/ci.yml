@@ -65,5 +65,5 @@ jobs:
         run: uv python install 3.12
       - name: Install locked environment
         run: uv sync --locked
-      - name: PostgreSQL migrations and integration tests
+      - name: PostgreSQL migrations, persistence, and authenticated API tests
         run: uv run --locked pytest -m integration tests/integration

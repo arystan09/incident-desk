@@ -8,7 +8,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from incident_desk.persistence.database import transaction
-from incident_desk.persistence.models import Base, Job, Run, RunStep
+from incident_desk.persistence.models import Base, Job, Run, RunStep, Tenant
 from tests.integration.conftest import migration_config
 
 pytestmark = pytest.mark.integration
@@ -24,6 +24,8 @@ def test_migrations_round_trip_and_metadata(empty_database):
             "runs",
             "jobs",
             "run_steps",
+            "tenants",
+            "api_keys",
         }
         context = MigrationContext.configure(
             connection, opts={"compare_type": True, "compare_server_default": True}
@@ -45,14 +47,14 @@ def test_migrations_round_trip_and_metadata(empty_database):
             } == expected
 
 
-def test_records_and_jsonb_round_trip(database):
+def test_records_and_jsonb_round_trip(database, tenant_id):
     payload = {
         "service": "synthetic-оплата",
         "counts": [1, 2],
         "nested": {"ok": True, "missing": None},
     }
     with transaction(database) as session:
-        run = Run(tenant_id=uuid4())
+        run = new_run(tenant_id)
         session.add(run)
         session.flush()
         job = Job(run_id=run.id)
@@ -80,9 +82,9 @@ def test_records_and_jsonb_round_trip(database):
 
 
 @pytest.fixture
-def run_id(database):
+def run_id(database, tenant_id):
     with transaction(database) as session:
-        run = Run(tenant_id=uuid4())
+        run = new_run(tenant_id)
         session.add(run)
     return run.id
 
@@ -115,8 +117,8 @@ def test_duplicate_job_rejected(database, run_id):
         (RunStep, {"step_no": 0}, "ck_run_steps_step_no"),
     ],
 )
-def test_checks_rejected(database, run_id, model, fields, constraint):
-    values = {"tenant_id": uuid4()} if model is Run else {"run_id": run_id}
+def test_checks_rejected(database, run_id, tenant_id, model, fields, constraint):
+    values = run_values(tenant_id) if model is Run else {"run_id": run_id}
     if model is RunStep:
         values.update(step_no=1, kind="fixture")
     values.update(fields)
@@ -150,10 +152,10 @@ def test_run_deletion_restricted(database, run_id, model, fields):
         assert session.get(Run, run_id) is not None
 
 
-def test_failed_transaction_leaves_no_partial_run_or_job(database):
+def test_failed_transaction_leaves_no_partial_run_or_job(database, tenant_id):
     run_id = uuid4()
     with pytest.raises(IntegrityError), transaction(database) as session:
-        session.add(Run(id=run_id, tenant_id=uuid4()))
+        session.add(new_run(tenant_id, id=run_id))
         session.flush()
         session.add(Job(run_id=run_id))
         session.flush()  # Both inserts actually reached PostgreSQL.
@@ -162,6 +164,28 @@ def test_failed_transaction_leaves_no_partial_run_or_job(database):
         assert session.get(Run, run_id) is None
         assert session.scalars(select(Job).where(Job.run_id == run_id)).all() == []
         # A subsequent transaction can still commit successfully.
-        session.add(Run(id=run_id, tenant_id=uuid4()))
+        session.add(new_run(tenant_id, id=run_id))
     with transaction(database) as session:
         assert session.get(Run, run_id) is not None
+
+
+@pytest.fixture
+def tenant_id(database):
+    with transaction(database) as session:
+        tenant = Tenant(name="Persistence fixture")
+        session.add(tenant)
+    return tenant.id
+
+
+def run_values(tenant_id):
+    return dict(
+        tenant_id=tenant_id,
+        service_id="test",
+        incident_id="fixture",
+        idempotency_key=str(uuid4()),
+        request_hash="0" * 64,
+    )
+
+
+def new_run(tenant_id, **overrides):
+    return Run(**(run_values(tenant_id) | overrides))

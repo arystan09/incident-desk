@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    String,
     Text,
     UniqueConstraint,
     func,
@@ -30,11 +31,20 @@ class Run(Base):
             name="ck_runs_status",
         ),
         CheckConstraint("state_version >= 0", name="ck_runs_state_version"),
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_runs_tenant_idempotency"
+        ),
         Index("ix_runs_tenant_created", "tenant_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", name="fk_runs_tenant_id", ondelete="RESTRICT")
+    )
+    service_id: Mapped[str] = mapped_column(String(128))
+    incident_id: Mapped[str] = mapped_column(String(128))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(Text, server_default="queued")
     state_version: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[datetime] = mapped_column(
@@ -111,3 +121,26 @@ class RunStep(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Tenant(Base):
+    __tablename__ = "tenants"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("key_digest", name="uq_api_keys_digest"),)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id", name="fk_api_keys_tenant_id", ondelete="RESTRICT")
+    )
+    key_digest: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

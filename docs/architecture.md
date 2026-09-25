@@ -25,17 +25,27 @@ Other fields are deliberately not indexed without a query requirement.
 
 An explicit engine scope owns pool disposal, and each synchronous transaction
 helper commits or rolls back and closes its session. No connection opens on import,
-no migration runs on startup, and the HTTP app still has no database dependency.
+no migration runs on startup, and liveness has no database dependency.
 Future async handlers must offload blocking work rather than run it on the event
 loop. Timestamps use TIMESTAMPTZ; initial values come from PostgreSQL. ORM updates
 maintain updated_at; direct SQL callers must do so explicitly. State versions and
 lease fields only prepare later recovery work. See [ADR 0002](adr/0002-synchronous-persistence.md).
 
-There is still no readiness endpoint. F1-02 intentionally implements persistence
-only; database-aware API lifecycle/readiness will be added when an API operation
-uses the database. All 16 integration cases pass on local PostgreSQL 17.11,
+There is still no readiness endpoint. F1-02 implemented persistence only;
+F1-03 adds database-aware API lifecycle ownership for the run endpoints. All 16 integration cases pass on local PostgreSQL 17.11,
 including real migration round-trips and transaction rollback. Hosted integration
 CI is not verified by this local run.
+
+## Implemented in F1-03
+
+Tenant and API-key tables now back synchronous bearer authentication. The local
+provisioning CLI generates keys; only their SHA-256 digests are stored. POST
+/v1/runs validates identifiers, derives tenant identity from the key, and inserts
+a run/job pair atomically. PostgreSQL uniqueness on tenant/idempotency key and an
+INSERT ON CONFLICT path serialize competing creates. GET selects by run and tenant.
+Replays return current persisted state; mismatched input conflicts. There is no
+worker execution or fixture lookup. [ADR 0003](adr/0003-tenant-run-api.md) describes
+migration backfill, transaction ownership, and the concurrency assumptions.
 
 ## Planned boundaries
 
@@ -61,8 +71,8 @@ jobs, steps, immutable proposals, approvals, local tickets, and audit records.
 SQLAlchemy 2 synchronous persistence and Alembic are now implemented in F1-02;
 the remaining tables and end-to-end guarantees below are future work.
 
-The API will authenticate callers, derive tenant context, authorize every operation,
-and create idempotent runs. The worker will claim PostgreSQL jobs with bounded
+The run API now authenticates callers, derives tenant context, and authorizes
+idempotent creation and reads. The future worker will claim PostgreSQL jobs with bounded
 leases and fencing tokens, persist step progress, and resume after failure. No
 transaction will remain open during a model call. Cancellation, deadlines, retries,
 and tool/model budgets will be explicit and bounded.
@@ -85,16 +95,16 @@ into telemetry. Runtime fixtures and offline gold evaluation labels will have
 separate access boundaries. Evaluations will publish reproducible artifacts rather
 than invented measurements.
 
-## Required future invariants (none implemented yet)
+## Invariants and implementation status
 
-- The same tenant, idempotency key, and input resolve to the same run.
-- Reusing an idempotency key with different input produces a conflict.
-- An expired worker cannot commit progress after a newer lease takes ownership.
-- Approval binds to an immutable proposal hash/version, not editable text or a run alone.
-- Tenant identity comes from authenticated context, never a caller-controlled body field.
-- Local ticket effects and audit records commit atomically.
-- Gold evaluation labels are inaccessible to the runtime.
-- Missing usage or cost is unknown, never silently zero.
+- Implemented in F1-03: the same tenant, idempotency key, and input resolve to the same run.
+- Implemented in F1-03: reusing an idempotency key with different input produces a conflict.
+- Future: an expired worker cannot commit progress after a newer lease takes ownership.
+- Future: approval binds to an immutable proposal hash/version, not editable text or a run alone.
+- Implemented in F1-03: tenant identity comes from authenticated context, never a caller-controlled body field.
+- Future: local ticket effects and audit records commit atomically.
+- Future: gold evaluation labels are inaccessible to the runtime.
+- Future: missing usage or cost is unknown, never silently zero.
 
 Real PostgreSQL tests must establish locking and transaction properties; SQLite or
 mocked repositories cannot demonstrate those guarantees. Default tests must remain

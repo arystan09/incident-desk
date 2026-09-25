@@ -3,7 +3,7 @@
 Current milestone: **F1 — Durable investigation foundation**.
 Statuses: `todo | in_progress | blocked | in_review | done`.
 Owner verification is required to move work from `in_review` to `done`.
-Current task: F1-02 persistence only. Do not proceed to F1-03.
+Current task: F1-03 authenticated run API. Do not proceed to F1-04.
 
 ## F1 — Durable investigation foundation
 
@@ -39,7 +39,7 @@ Current task: F1-02 persistence only. Do not proceed to F1-03.
 
 ### F1-02: PostgreSQL run/job/step models and migrations
 
-- Status: in_review
+- Status: done
 - Dependencies: F1-01 (accepted by owner).
 - Scope: SQLAlchemy 2 synchronous sessions, psycopg 3, explicit engine/transaction
   ownership, run/job/step constraints and indexes, Alembic migrations, disposable
@@ -85,19 +85,57 @@ Current task: F1-02 persistence only. Do not proceed to F1-03.
   are retained. Restart db and use the explicit uv --env-file command above to rerun.
 - Remaining limits: hosted GitHub Actions was not verified by these local checks;
   the CI service uses its bootstrap role, while local tests used the restricted
-  dedicated role. Owner verification is pending. No tenant isolation, worker claims,
-  fencing, or public run endpoints are implemented. Do not start F1-03 in this task.
+  dedicated role. At F1-02 completion, tenant isolation, worker claims, fencing,
+  and public run endpoints were still future work.
+- Owner acceptance: the owner accepted the reported F1-02 verification as sufficient
+  to proceed with F1-03. This does not claim hosted CI or an independent source audit.
+  feat/f1-03-run-api branches directly from verified F1-02 commit 521b041;
+  it builds on that history without merging or rewriting it.
 
 ### F1-03: Tenant-scoped API authentication and idempotent run creation
 
-- Status: todo
-- Dependencies: F1-02.
-- Scope: authenticated tenant context, authorization, request validation,
-  idempotency constraints, and run creation/status endpoints.
-- Acceptance: same tenant/key/input returns the same run, including concurrent
-  requests; different input conflicts; cross-tenant access is denied; callers cannot
-  set trusted tenant identity through a request body.
-- Evidence: none; not implemented.
+- Status: in_review
+- Dependencies: F1-02 (accepted by owner).
+- Scope: tenants/API-key digests, local provisioning CLI, bearer authentication,
+  strict request/response schemas, tenant-filtered POST/GET run endpoints, atomic
+  run/job creation, PostgreSQL idempotency, migration/backfill, API tests and docs.
+- Acceptance: missing/malformed/unknown/revoked keys produce 401 with challenge;
+  authenticated tenant identity cannot be spoofed; same tenant/key/input returns
+  one run/job under sequential and coordinated concurrent requests; changed input
+  conflicts; different tenants are independent; reads do not disclose other tenants;
+  failed job insertion rolls back the run; PostgreSQL failures are generic 503 while
+  liveness stays public; legacy 0001 data survives 0002; all quality checks pass.
+- Migration evidence: development inspection before upgrade found 0 runs and 0
+  distinct tenant IDs. New migration 0002 preserves legacy tenant IDs via tenants
+  without API keys and internal v0 request placeholders; 0001 is unchanged. A real
+  disposable migration test preserves representative status, version, job, and JSONB
+  step history, then checks the new tenant foreign key. Development upgrade reached
+  `0002 (head)`; `uv run --locked alembic check` found no new upgrade operations.
+- Integration evidence: `uv run --locked --env-file .env.test pytest -m integration
+  tests/integration --tb=short` passed 52 cases on PostgreSQL 17.11. This includes
+  the original 16 persistence cases updated for the new required tenant/fields,
+  all authentication/validation paths, spoofing, sequential/equivalent replay,
+  cross-tenant 404 equivalence, and two coordinated concurrency cases using distinct
+  backend PIDs. A real job constraint failure proves atomic rollback. A terminated
+  test-owned database connection produces generic 503; SQL programming errors remain
+  errors. The first run exposed a JSON SQL quoting issue in the new legacy fixture;
+  it was fixed without weakening preservation assertions.
+- HTTP smoke evidence: provisioned a synthetic local tenant through the actual CLI
+  with captured private output, started a temporary Uvicorn process, observed POST
+  202, identical replay 202/same ID, GET 200, and public liveness 200. Stopped only
+  that process and revoked only its generated key. Synthetic smoke history remains
+  in the development database; no investigation was executed.
+- Final quality evidence: `uv run --locked ruff format --check .` and
+  `uv run --locked ruff check .` passed; `uv run --locked mypy` passed for 16
+  application files; `uv run --locked pytest` passed 28 fast tests (52 integration
+  cases deselected). `uv build` produced the wheel and source archive; inspection
+  found no private configuration or local tooling. `git diff --check` passed.
+  The existing Starlette/HTTPX warning remains. CI still runs the complete
+  tests/integration directory, including the new API tests.
+- Cleanup and limits: zero disposable test databases remained. Stopped this task's
+  project db service while retaining its data and ignored credentials on port 55432.
+  Owner review is pending; hosted CI and an independent source/security audit are
+  not claimed. No F1-04 work is included.
 
 ### F1-04: Worker claims, leases, fencing, and fake-provider execution
 

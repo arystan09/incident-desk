@@ -5,20 +5,19 @@ synthetic service environment. The intended workflow is to investigate an incide
 gather evidence, return a supported conclusion or abstain, and propose a local
 ticket update. Applying that exact proposal will require human approval.
 
-**The API foundation and PostgreSQL persistence code are implemented. PostgreSQL
-integration tests pass against PostgreSQL 17.11; F1-02 is awaiting owner review.**
+**API-key authentication and tenant-scoped run creation/read APIs are implemented.
+Runs are queued; investigation execution is not implemented.**
 
 ## What works today
 
-The FastAPI application exposes `GET /health/live` and validates environment
-settings. It starts without PostgreSQL or a model API key. The persistence package
-contains synchronous SQLAlchemy 2/psycopg 3 models for runs, jobs, and steps, explicit
-transaction helpers, and an Alembic migration. All 16 PostgreSQL integration
-cases pass, including migrations, constraints, JSONB persistence, and rollback.
+`GET /health/live` is public and independent of PostgreSQL. A local CLI provisions
+tenants and random API keys. Authenticated callers can create a run and its job
+atomically, replay a request safely, and read their own runs. PostgreSQL stores
+only key digests. There is no investigation, worker, evidence tool, model call,
+approval flow, reviewer role, or UI yet.
 
-Investigation endpoints, authentication, workers, evidence tools, model calls,
-approval, and a review interface are planned. See the [roadmap](ROADMAP.md),
-[architecture](docs/architecture.md), and [persistence ADR](docs/adr/0002-synchronous-persistence.md).
+See the [roadmap](ROADMAP.md), [architecture](docs/architecture.md), and
+[API transaction ADR](docs/adr/0003-tenant-run-api.md) for scope and decisions.
 
 ## Run the API
 
@@ -121,7 +120,7 @@ must succeed. This setup was verified locally with PostgreSQL 17.11.
    different role/database names, and URL query overrides. Each test creates a
    unique `incident_desk_test_<uuid>` database, runs migrations and assertions, then
    drops only that database. It never resets the supplied maintenance database or
-   reads the application URL. The 16 cases include upgrade/downgrade/upgrade,
+   reads the application URL. The suite includes upgrade/downgrade/upgrade,
    schema comparison, constraints, JSONB round-trips, and atomic rollback.
 
    If your local setup already has an ignored `.env.test` containing the test URL,
@@ -156,14 +155,64 @@ docker compose -p incident-desk-f1 stop api
 ```
 
 The API container runs as a non-root user and uses a standard-library liveness
-check. It does not start the optional database service.
+check. This Compose command is a liveness-only setup: it does not pass the host
+database URL to the container. Use the host uvicorn setup below for the run API.
+
+## Provision and call the run API (PowerShell)
+
+Start the project database and upgrade it before provisioning. Existing local
+`.env` and `.env.test` use port 55432; keep those credentials and settings.
+
+```powershell
+docker compose -p incident-desk-f1 --profile database up -d --wait db
+uv run --locked alembic upgrade head
+uv run --locked python -m incident_desk.provision --name "Local demo"
+```
+
+The last command creates a new tenant and displays its generated API key once.
+Store it privately. It accepts no user-chosen secret; the database stores only a
+SHA-256 digest. Repeating the command creates another tenant, not a replacement key.
+There is no public provisioning endpoint. Start the API with the uvicorn command
+above, then use another terminal:
+
+```powershell
+$credential = Get-Credential -UserName api -Message 'Paste the generated API key as the password'
+$headers = @{ Authorization = "Bearer $($credential.GetNetworkCredential().Password)"; 'Idempotency-Key' = 'demo-001' }
+$body = @{ service_id = 'checkout'; incident_id = 'fixture-001' } | ConvertTo-Json
+$run = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/v1/runs' -Headers $headers -ContentType 'application/json' -Body $body
+$replay = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/v1/runs' -Headers $headers -ContentType 'application/json' -Body $body
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/runs/$($run.id)" -Headers $headers
+Remove-Variable credential, headers
+```
+
+POST and identical replay return 202 and a Location header. Both return the same
+run ID; replay may show the run's current persisted state. Reusing the same key
+with different input returns 409. Keys are case-sensitive and scoped to the
+authenticated tenant; another tenant can independently use `demo-001`.
+
+Identifiers are strings, trimmed, nonempty, and at most 128 characters. Unknown
+body fields are rejected. Idempotency-Key is required and must contain 1-128
+printable ASCII characters without whitespace. JSON field order does not affect
+request identity. Responses expose only id, service_id, incident_id, status, and
+created_at. No check is made that the incident exists or has been investigated.
+
+Missing, malformed, unknown, or revoked bearer keys return 401 with
+WWW-Authenticate: Bearer. Invalid input returns 422; missing and other-tenant run
+IDs both return the same 404. Tenant identity always comes from the stored API key.
+Database connection failures return a generic 503 while liveness stays available.
+Use HTTPS for any non-local bearer-key traffic. Do not log or share the headers.
+
+The API integration tests are under `tests/integration`, so the existing
+`uv run --locked pytest -m integration tests/integration` command and CI integration
+job include authentication, migration/backfill, and coordinated concurrency tests.
+For the retained local credentials use `uv run --locked --env-file .env.test pytest
+-m integration tests/integration`. The database must be running.
 
 ## Current limitations
 
-Liveness reports only that the HTTP process responds. There is no database
-readiness endpoint, tenant isolation, worker recovery, or approval enforcement yet.
-The 25 unit tests and 16 PostgreSQL integration tests pass. The API container
-builds, becomes healthy, and returns HTTP 200 for liveness. Hosted GitHub Actions
-has not been verified in this task, and owner review of F1-02 is pending.
-[ROADMAP.md](ROADMAP.md) records executed checks separately from setup
-instructions. Contribution rules are in [AGENTS.md](AGENTS.md).
+API-key authentication is implemented; investigation execution is not. Tenant
+isolation is enforced in application queries, not PostgreSQL row-level security.
+There is no key-management HTTP API, database readiness endpoint, worker recovery,
+or approval enforcement. Local verification does not establish hosted CI results
+or an independent security/source audit. F1-03 requires owner review before done.
+[ROADMAP.md](ROADMAP.md) records exact checks. Contribution rules are in [AGENTS.md](AGENTS.md).

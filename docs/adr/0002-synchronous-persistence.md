@@ -1,6 +1,6 @@
 # ADR 0002: Synchronous persistence and explicit migrations
 
-Status: proposed for owner review; F1-02 PostgreSQL execution is not yet verified.
+Status: proposed for owner review; all 16 F1-02 integration cases pass locally on PostgreSQL 17.11.
 
 ## Decision
 

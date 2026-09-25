@@ -8,7 +8,7 @@ validated with pydantic-settings. The API starts without a database or model key
 No readiness claim is made. Tests, static checks, container configuration, and CI
 form the foundation; the capabilities below are planned, not implemented.
 
-## Implemented in F1-02 (PostgreSQL execution pending)
+## Implemented in F1-02 (verified locally; owner review pending)
 
 The persistence package defines runs, jobs, and run_steps using SQLAlchemy 2,
 psycopg 3, and PostgreSQL JSONB. The initial Alembic revision creates named status
@@ -33,8 +33,9 @@ lease fields only prepare later recovery work. See [ADR 0002](adr/0002-synchrono
 
 There is still no readiness endpoint. F1-02 intentionally implements persistence
 only; database-aware API lifecycle/readiness will be added when an API operation
-uses the database. Real PostgreSQL execution remains blocked locally; integration
-CI is configured but has not run. Offline checks are not database evidence.
+uses the database. All 16 integration cases pass on local PostgreSQL 17.11,
+including real migration round-trips and transaction rollback. Hosted integration
+CI is not verified by this local run.
 
 ## Planned boundaries
 

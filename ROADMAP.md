@@ -34,58 +34,59 @@ Current task: F1-02 persistence only. Do not proceed to F1-03.
   F1-01 checks as sufficient to proceed. Docker build/startup remains untested;
   hosted GitHub Actions has not run. Acceptance does not close those gaps.
   Foundation history was subsequently established as commit 57e75eb on main.
+  The later F1-02 verification below closes the local Docker build/startup gap;
+  it does not establish a hosted CI result.
 
 ### F1-02: PostgreSQL run/job/step models and migrations
 
-- Status: blocked
+- Status: in_review
 - Dependencies: F1-01 (accepted by owner).
 - Scope: SQLAlchemy 2 synchronous sessions, psycopg 3, explicit engine/transaction
   ownership, run/job/step constraints and indexes, Alembic migrations, disposable
   PostgreSQL integration tests, optional Compose database, and CI integration job.
-  Database readiness is deferred until an API operation uses persistence; no fake
-  readiness route or public run endpoint is introduced.
-- Acceptance: migrations apply to an empty real PostgreSQL database, model metadata
-  matches, downgrade/base/upgrade round-trip succeeds only in a disposable database;
-  records and JSONB round-trip; status/counter/FK/uniqueness constraints and restricted
-  deletion reject invalid operations; a failed unit of work rolls back run and job;
-  liveness works without a database; explicit integration requests fail if unavailable.
-- Evidence (2026-09-25, Python 3.12.14): locked sync succeeded; Ruff linting and
-  formatting verification passed; mypy passed for 8 application source files;
-  `uv run --locked pytest` passed 25 unit tests with 16 integration cases deselected.
-  The existing Starlette/HTTPX deprecation warning remains. `uv build` produced a
-  wheel and source archive, inspected to exclude credentials and local caches.
-  `uv run --locked alembic upgrade head --sql` rendered the complete PostgreSQL DDL
-  successfully; this is not evidence of PostgreSQL execution.
-- Blocker: `uv run --locked pytest -m integration tests/integration --maxfail=1`
-  collected 16 cases and failed at setup with the actionable missing
-  TEST_DATABASE_URL message (no tests silently skipped). No running PostgreSQL
-  service/listener or Docker is available. The local PostgreSQL 17 directory has
-  postgres/psql executables but lacks initdb and pg_ctl, so it cannot provision a
-  fresh isolated server using those tools. No system service or OS setting changed.
-- Unverified: actual upgrade/downgrade, live schema comparison, SQL constraints,
-  persistence, and rollback against PostgreSQL. Docker build/startup and both hosted
-  CI jobs remain unrun. Set up the dedicated local test role/URL using README.md,
-  run all 16 integration cases, and only then mark this task in_review.
-
-- Verification/setup follow-up: checked Get-Command for docker/psql/pg_ctl/initdb,
-  matching Windows services, standard Docker/initdb/pg_ctl executable paths, and
-  `Test-NetConnection -ComputerName 127.0.0.1 -Port 5432 -InformationLevel Quiet`.
-  No tools on PATH or matching services were found; executable-path checks and
-  the port probe returned false. TEST_DATABASE_URL remains unset. No PostgreSQL
-  integration command was repeated merely to reproduce missing configuration.
-- Inspected, not executed: Compose's PostgreSQL 17 `db` service, `database` profile,
-  localhost port 5432 default, environment example, fixture database creation and
-  cleanup, and CI configuration. README now supplies one Windows Compose path,
-  explicit dedicated-role creation with LOGIN/CREATEDB and maintenance CONNECT,
-  password prompting, and the integration command. These setup instructions are
-  not evidence that Docker or PostgreSQL ran. The manual prerequisite is a running
-  Docker Desktop Linux-container engine with the Compose CLI available.
-- Follow-up checks executed: `uv run --locked ruff format --check .` passed;
-  `uv run --locked ruff check .` passed; `uv run --locked mypy` passed (8 source
-  files); `uv run --locked pytest` passed 25 unit tests, with 16 integration cases
-  deselected and the existing Starlette/HTTPX warning. `git diff --check` passed.
-  No implementation assertions were changed. F1-02 remains blocked; Docker
-  build/startup and hosted CI remain unverified.
+  Database readiness remains deferred until an API operation uses persistence.
+- Acceptance: real PostgreSQL migration from empty, metadata comparison,
+  downgrade/base/upgrade in a disposable database; persistence and JSONB round-trip;
+  status/counter/FK/uniqueness/deletion constraints; atomic rollback of run and job;
+  liveness independent of PostgreSQL; actionable errors if integration setup is absent.
+- Previous blocker resolved: earlier attempts stopped at missing PostgreSQL tooling
+  and TEST_DATABASE_URL. Docker Desktop is now accessible: Engine 29.8.0, Linux
+  containers, Compose 5.5.1. No project containers or volumes existed before setup.
+- Setup executed: `docker compose -p incident-desk-f1 --profile database up -d --wait db`.
+  Windows denied binding 127.0.0.1:5432. Changed only ignored local configuration
+  to POSTGRES_PORT=55432 and matching connection URLs; the retry became healthy.
+  PostgreSQL reports 17.11. Generated private development/test credentials in
+  ignored `.env` and `.env.test`; none are committed or displayed. Created the
+  dedicated test role with LOGIN/CREATEDB and CONNECT to postgres; explicitly
+  verified NOSUPERUSER, NOCREATEROLE, NOREPLICATION, and NOBYPASSRLS.
+- Migration evidence: `uv run --locked alembic upgrade head` succeeded on the new
+  development database; `uv run --locked alembic current` returned `0001 (head)`.
+  `uv run --locked alembic check` reported no new upgrade operations. No development
+  database downgrade/reset was performed.
+- Integration evidence: `uv run --locked pytest -m integration tests/integration`
+  passed all 16 cases with TEST_DATABASE_URL exported. Added `path_separator = os`
+  to alembic.ini to remove its configuration deprecation warning, then reran with
+  `uv run --locked --env-file .env.test pytest -m integration tests/integration`:
+  16 passed, no warnings. Assertions were unchanged. This includes real upgrade /
+  downgrade / upgrade, model comparison, constraints, JSONB, and atomic rollback.
+  A maintenance query afterward confirmed zero remaining incident_desk_test_*
+  databases. Fixtures dropped only databases they created.
+- Quality evidence: `uv run --locked ruff format --check .`,
+  `uv run --locked ruff check .`, and `uv run --locked mypy` passed (8 source files).
+  `uv run --locked pytest` passed 25 unit tests, deselecting 16 integration cases;
+  the existing upstream Starlette/HTTPX warning remains. `uv build` produced the
+  wheel and source archive. `git diff --check` passed.
+- Docker evidence: `docker compose -p incident-desk-f1 up --build -d --wait api`
+  built the image and reached healthy status. `curl.exe --fail --silent --show-error
+  -w '\nHTTP %{http_code}\n' http://127.0.0.1:8000/health/live` returned HTTP 200 and
+  exactly `{"status":"ok"}`. This closes the earlier local API-container verification gap.
+- Cleanup: stopped only this task's API and db services with Compose `stop api` and
+  `--profile database stop db`. The development volume and ignored connection files
+  are retained. Restart db and use the explicit uv --env-file command above to rerun.
+- Remaining limits: hosted GitHub Actions was not verified by these local checks;
+  the CI service uses its bootstrap role, while local tests used the restricted
+  dedicated role. Owner verification is pending. No tenant isolation, worker claims,
+  fencing, or public run endpoints are implemented. Do not start F1-03 in this task.
 
 ### F1-03: Tenant-scoped API authentication and idempotent run creation
 

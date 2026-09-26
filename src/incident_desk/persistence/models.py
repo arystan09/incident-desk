@@ -66,6 +66,12 @@ class Job(Base):
         CheckConstraint("attempt_count >= 0", name="ck_jobs_attempt_count"),
         CheckConstraint("lease_generation >= 0", name="ck_jobs_lease_generation"),
         Index(
+            "ix_jobs_running_lease",
+            "lease_expires_at",
+            "id",
+            postgresql_where=text("status = 'running'"),
+        ),
+        Index(
             "ix_jobs_queued_next_attempt",
             "next_attempt_at",
             "id",
@@ -83,6 +89,8 @@ class Job(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     lease_owner: Mapped[str | None] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_generation: Mapped[int] = mapped_column(server_default="0")
     created_at: Mapped[datetime] = mapped_column(

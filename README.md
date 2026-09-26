@@ -6,14 +6,15 @@ gather evidence, return a supported conclusion or abstain, and propose a local
 ticket update. Applying that exact proposal will require human approval.
 
 **API-key authentication and tenant-scoped run creation/read APIs are implemented.
-Runs are queued; investigation execution is not implemented.**
+A separate worker processes queued synthetic fixtures; no LLM execution exists.**
 
 ## What works today
 
 `GET /health/live` is public and independent of PostgreSQL. A local CLI provisions
 tenants and random API keys. Authenticated callers can create a run and its job
 atomically, replay a request safely, and read their own runs. PostgreSQL stores
-only key digests. There is no investigation, worker, evidence tool, model call,
+only key digests. The worker persists deterministic fixture steps. There is no
+evidence tool, model call,
 approval flow, reviewer role, or UI yet.
 
 See the [roadmap](ROADMAP.md), [architecture](docs/architecture.md), and
@@ -210,9 +211,63 @@ For the retained local credentials use `uv run --locked --env-file .env.test pyt
 
 ## Current limitations
 
-API-key authentication is implemented; investigation execution is not. Tenant
+API-key authentication and deterministic synthetic execution are implemented. Tenant
 isolation is enforced in application queries, not PostgreSQL row-level security.
-There is no key-management HTTP API, database readiness endpoint, worker recovery,
+There is no key-management HTTP API, database readiness endpoint, provider execution,
 or approval enforcement. Local verification does not establish hosted CI results
-or an independent security/source audit. F1-03 requires owner review before done.
+or an independent security/source audit. F1-04 requires owner review before done.
 [ROADMAP.md](ROADMAP.md) records exact checks. Contribution rules are in [AGENTS.md](AGENTS.md).
+
+## Run the worker (PowerShell)
+
+Keep the working port **55432** and ignored `.env` / `.env.test`. Start PostgreSQL,
+apply migrations, provision a key and start the API using the commands above.
+In a separate terminal from this repository:
+
+```powershell
+uv run --locked python -m incident_desk.worker
+```
+
+Run the same command in another terminal for a second competing worker. Each process
+gets its own generated identity. Ctrl+C stops new claims and lets the current short
+fixture finish. Abrupt termination is recovered through lease expiry.
+
+Submit and replay the existing PowerShell example with service `checkout` and
+incident `fixture-001`, then repeat its GET command. The API remains nonblocking;
+expect `queued` -> `running` -> `completed` (success), or `failed`. Fast execution
+may finish before you observe running. Replay returns the same run's current state.
+The existing response fields are unchanged; steps and lease data are not public.
+
+Available synthetic catalog pairs:
+
+| service_id | incident_id | Fixture |
+| --- | --- | --- |
+| checkout | fixture-001 | Latency and cache timeouts |
+| payments | fixture-002 | Payment gateway errors |
+| database | fixture-003 | Connection saturation |
+
+The worker records fixture loading, metrics, logs, runbook and a fixed structured
+summary as five steps. This is deterministic orchestration, not LLM reasoning or
+proof of a real incident cause. Missing fixtures fail without retrying.
+
+Defaults are a 60-second lease, three attempts, and 1-second idle polling. Explicit
+transient failures schedule retries after 2 then 4 seconds. Expired leases can be
+reclaimed; old owners cannot publish after replacement. Computation may repeat after
+a crash, but successful results commit once. No external side effects are performed.
+See [ADR 0004](docs/adr/0004-worker-lifecycle.md) for transaction and recovery limits.
+
+Settings can be overridden with `INCIDENT_DESK_WORKER_POLL_SECONDS`,
+`INCIDENT_DESK_WORKER_LEASE_SECONDS`, `INCIDENT_DESK_WORKER_MAX_ATTEMPTS`, and
+`INCIDENT_DESK_WORKER_RETRY_BASE_SECONDS`. Use the same policy for all workers.
+The worker does not migrate automatically. JSON logs report lifecycle events without
+credentials or evidence bodies. No Prometheus or tracing stack is required.
+
+Run all PostgreSQL tests, including an actual CLI/API/worker subprocess smoke test:
+
+```powershell
+uv run --locked --env-file .env.test pytest -m integration tests/integration
+```
+
+The smoke test uses its own disposable database and stops only subprocesses it
+created. It leaves ordinary development data intact. Existing queued development
+runs are processed when you start a worker; an unknown fixture becomes failed.

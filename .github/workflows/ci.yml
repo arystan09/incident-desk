@@ -32,6 +32,8 @@ jobs:
         run: uv run --locked mypy
       - name: Test
         run: uv run --locked pytest
+      - name: Build package
+        run: uv build
 
   integration:
     runs-on: ubuntu-latest
@@ -65,5 +67,5 @@ jobs:
         run: uv python install 3.12
       - name: Install locked environment
         run: uv sync --locked
-      - name: PostgreSQL migrations, persistence, and authenticated API tests
+      - name: PostgreSQL migrations, API, worker, and subprocess smoke tests
         run: uv run --locked pytest -m integration tests/integration

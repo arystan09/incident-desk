@@ -3,7 +3,7 @@
 Current milestone: **F1 — Durable investigation foundation**.
 Statuses: `todo | in_progress | blocked | in_review | done`.
 Owner verification is required to move work from `in_review` to `done`.
-Current task: F1-03 authenticated run API. Do not proceed to F1-04.
+Current task: F1-04 worker lifecycle. Do not proceed to F1-05.
 
 ## F1 — Durable investigation foundation
 
@@ -94,7 +94,7 @@ Current task: F1-03 authenticated run API. Do not proceed to F1-04.
 
 ### F1-03: Tenant-scoped API authentication and idempotent run creation
 
-- Status: in_review
+- Status: done
 - Dependencies: F1-02 (accepted by owner).
 - Scope: tenants/API-key digests, local provisioning CLI, bearer authentication,
   strict request/response schemas, tenant-filtered POST/GET run endpoints, atomic
@@ -137,16 +137,55 @@ Current task: F1-03 authenticated run API. Do not proceed to F1-04.
   Owner review is pending; hosted CI and an independent source/security audit are
   not claimed. No F1-04 work is included.
 
-### F1-04: Worker claims, leases, fencing, and fake-provider execution
+- Owner acceptance: the owner accepted the reported F1-03 verification as sufficient
+  to proceed. This does not establish hosted CI, production deployment or an independent
+  source audit. F1-04 builds directly on F1-03 commit bdb4aa8.
 
-- Status: todo
-- Dependencies: F1-02, F1-03.
-- Scope: separate worker role, PostgreSQL job claims, lease renewal/expiry, fenced
-  state transitions, step persistence, and minimal deterministic fake execution.
-- Acceptance: concurrent workers do not own the same valid lease; a stale worker
-  cannot commit after replacement; restart can resume persisted work; no database
-  transaction spans a provider call; default execution is offline.
-- Evidence: none; not implemented.
+### F1-04: Worker claims, leases, fencing, and deterministic fixture execution
+
+- Status: in_review
+- Dependencies: F1-02, F1-03 (accepted by owner).
+- Scope: separate worker process, PostgreSQL SKIP LOCKED claims, lease generations,
+  expiry recovery, bounded retries, atomic step publication, three synthetic fixtures,
+  JSON lifecycle logs, graceful stop, migration 0003 and real PostgreSQL tests.
+- Acceptance: competing workers cannot own one valid lease; expired/replaced owners
+  cannot publish; crash attempts and retries are bounded; fixture work runs outside
+  transactions; run/job states and steps commit atomically; API compatibility holds.
+- Decisions: reuse completed as success, queued plus next_attempt_at for retries,
+  and existing lease/attempt fields. Defaults: 60-second lease, 1-second idle poll,
+  three attempts, retry delays 2 then 4 seconds. No renewal for this small synchronous
+  catalog executor. Computation may repeat after expiry; successful publication is
+  fenced. Final structured summary is the last completed RunStep. See ADR 0004.
+- Migration evidence (2026-09-26): 0003 adds nullable claimed_at/last_error_code and
+  the running lease index without rewriting data. 0001/0002 are unchanged. A real
+  0002-data migration test preserves queued history and executes it after upgrade.
+  `uv run --locked alembic upgrade head` passed on the development database;
+  `uv run --locked alembic current` returned `0003 (head)`;
+  `uv run --locked alembic check` found no new upgrade operations.
+- Verification: `uv run --locked ruff format --check .` passed (46 files),
+  `uv run --locked ruff check .` passed, `uv run --locked mypy` passed (20 source
+  files), `uv run --locked pytest` passed 42 fast tests (69 deselected).
+  `uv run --locked --env-file .env.test pytest -m integration tests/integration
+  --tb=short` passed all 69 cases on local PostgreSQL, including all prior 52 cases.
+  Coverage includes separate-connection claim races, stale fencing, due retries,
+  crash exhaustion, missing fixtures, rollback on real step constraint failure,
+  transient-then-success history, shutdown, outage redaction, API isolation and replay.
+- Live smoke: included in the suite as test_worker_process.py; actual provisioning
+  CLI, Uvicorn API, and worker subprocesses ran against a fresh disposable database.
+  POST returned queued/202, GET reached completed/200, replay returned the same run,
+  and SQL assertions found exactly one run, one job/attempt, and five steps. Running
+  was too brief to require observation in the live smoke; integration tests verify it.
+  Generated key output was captured privately. Only test-created processes were stopped.
+- Build and review: `uv build` produced wheel and sdist; both include the fixture
+  catalog and exclude private configuration/caches/local tooling. The build emits
+  a cache-location warning; archive inspection confirmed exclusion. `git diff --check`
+  passed. No dependency changes were needed. CI keeps the full integration directory
+  (migration/schema comparison included) and now builds the package in its quality job.
+- Cleanup and limits: zero disposable databases remained; stopped only this task's
+  incident-desk-f1 db service, retaining volume and ignored credentials on port 55432.
+  The existing upstream Starlette/HTTPX warning remains. Hosted CI, independent source
+  audit and production deployment are not claimed. Windows forced termination is not
+  graceful; expiry handles it. No provider, UI, approvals or F1-05 work was added.
 
 ### F1-05: End-to-end fixture workflow and worker restart tests
 

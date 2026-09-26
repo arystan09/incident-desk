@@ -1,0 +1,5 @@
+[
+  {"service_id":"checkout","incident_id":"fixture-001","metrics":"Synthetic p95 latency 1200ms; cache hit rate 20%.","logs":"Synthetic cache timeout during checkout.","runbook":"Inspect cache connectivity before changing capacity.","summary":"Fixture latency coincides with cache timeouts.","likely_cause":"Cache connectivity degradation is consistent with the supplied evidence."},
+  {"service_id":"payments","incident_id":"fixture-002","metrics":"Synthetic payment error rate 15%.","logs":"Synthetic gateway requests return timeout.","runbook":"Inspect gateway availability and bounded retry settings.","summary":"Fixture payment errors coincide with gateway timeouts.","likely_cause":"Gateway availability is a candidate cause in this fixture."},
+  {"service_id":"database","incident_id":"fixture-003","metrics":"Synthetic connection pool utilization 100%.","logs":"Synthetic connection acquisition timeout.","runbook":"Inspect long-running queries and connection release behavior.","summary":"Fixture requests wait for exhausted pool connections.","likely_cause":"Connection saturation is consistent with this fixture."}
+]

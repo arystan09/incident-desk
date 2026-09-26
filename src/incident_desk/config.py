@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = Field(default=None, repr=False)
     database_connect_timeout: int = Field(default=5, ge=1, le=60)
     database_statement_timeout_ms: int = Field(default=10000, ge=1, le=300000)
+    worker_poll_seconds: float = Field(default=1, ge=0.1, le=60)
+    worker_lease_seconds: int = Field(default=60, ge=5, le=300)
+    worker_max_attempts: int = Field(default=3, ge=1, le=10)
+    worker_retry_base_seconds: int = Field(default=2, ge=1, le=60)
 
     @field_validator("database_url")
     @classmethod

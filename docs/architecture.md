@@ -6,9 +6,9 @@ One Python 3.12 package exposes a FastAPI application factory and
 `GET /health/live`, returning the typed response `{"status":"ok"}`. Settings are
 validated with pydantic-settings. The API starts without a database or model key.
 No readiness claim is made. Tests, static checks, container configuration, and CI
-form the foundation; the capabilities below are planned, not implemented.
+form the foundation. Subsequent implemented milestones and future boundaries are separated below.
 
-## Implemented in F1-02 (verified locally; owner review pending)
+## Implemented in F1-02 (accepted by owner)
 
 The persistence package defines runs, jobs, and run_steps using SQLAlchemy 2,
 psycopg 3, and PostgreSQL JSONB. The initial Alembic revision creates named status
@@ -19,7 +19,7 @@ keys restrict deletion of referenced runs; there are no cascade relationships.
 The run index `(tenant_id, created_at, id)` prepares tenant listing with stable
 ordering; primary keys serve individual run lookup. It does not enforce tenant
 isolation. A partial queued-job index `(next_attempt_at, id) WHERE status='queued'`
-prepares due-job selection; no claiming logic exists. The job run uniqueness and
+supports due-job selection; F1-04 implements claiming. The job run uniqueness and
 step `(run_id, step_no)` uniqueness also support loading a run's job and steps.
 Other fields are deliberately not indexed without a query requirement.
 
@@ -28,8 +28,8 @@ helper commits or rolls back and closes its session. No connection opens on impo
 no migration runs on startup, and liveness has no database dependency.
 Future async handlers must offload blocking work rather than run it on the event
 loop. Timestamps use TIMESTAMPTZ; initial values come from PostgreSQL. ORM updates
-maintain updated_at; direct SQL callers must do so explicitly. State versions and
-lease fields only prepare later recovery work. See [ADR 0002](adr/0002-synchronous-persistence.md).
+maintain updated_at; direct SQL callers must do so explicitly. F1-04 now uses state versions and
+lease fields for fenced lifecycle transitions. See [ADR 0002](adr/0002-synchronous-persistence.md).
 
 There is still no readiness endpoint. F1-02 implemented persistence only;
 F1-03 adds database-aware API lifecycle ownership for the run endpoints. All 16 integration cases pass on local PostgreSQL 17.11,
@@ -43,8 +43,8 @@ provisioning CLI generates keys; only their SHA-256 digests are stored. POST
 /v1/runs validates identifiers, derives tenant identity from the key, and inserts
 a run/job pair atomically. PostgreSQL uniqueness on tenant/idempotency key and an
 INSERT ON CONFLICT path serialize competing creates. GET selects by run and tenant.
-Replays return current persisted state; mismatched input conflicts. There is no
-worker execution or fixture lookup. [ADR 0003](adr/0003-tenant-run-api.md) describes
+Replays return current persisted state; mismatched input conflicts. F1-04 adds
+worker execution and fixture lookup. [ADR 0003](adr/0003-tenant-run-api.md) describes
 migration backfill, transaction ownership, and the concurrency assumptions.
 
 ## Planned boundaries
@@ -64,7 +64,7 @@ flowchart LR
     Eval[Offline evaluator + gold labels] --> Artifacts[Evaluation artifacts]
 ```
 
-The API and worker will be separate process roles in one modular application.
+The API and worker are separate process roles in one modular application.
 Domain rules will remain independent of HTTP, SQLAlchemy persistence, and provider
 adapters. PostgreSQL will be the durable source of truth for tenant-scoped runs,
 jobs, steps, immutable proposals, approvals, local tickets, and audit records.
@@ -72,10 +72,10 @@ SQLAlchemy 2 synchronous persistence and Alembic are now implemented in F1-02;
 the remaining tables and end-to-end guarantees below are future work.
 
 The run API now authenticates callers, derives tenant context, and authorizes
-idempotent creation and reads. The future worker will claim PostgreSQL jobs with bounded
-leases and fencing tokens, persist step progress, and resume after failure. No
-transaction will remain open during a model call. Cancellation, deadlines, retries,
-and tool/model budgets will be explicit and bounded.
+idempotent creation and reads. The worker now claims PostgreSQL jobs with bounded
+leases and fencing tokens and publishes deterministic fixture results. No
+transaction will remain open during a model call. Worker retries are now bounded;
+cancellation, provider deadlines and tool/model budgets remain future work.
 
 A narrow typed model adapter will support a deterministic scripted fake by default
 and a real provider later. Model output must pass schema and evidence-reference
@@ -99,7 +99,7 @@ than invented measurements.
 
 - Implemented in F1-03: the same tenant, idempotency key, and input resolve to the same run.
 - Implemented in F1-03: reusing an idempotency key with different input produces a conflict.
-- Future: an expired worker cannot commit progress after a newer lease takes ownership.
+- Implemented in F1-04: an expired worker cannot publish after a newer lease takes ownership.
 - Future: approval binds to an immutable proposal hash/version, not editable text or a run alone.
 - Implemented in F1-03: tenant identity comes from authenticated context, never a caller-controlled body field.
 - Future: local ticket effects and audit records commit atomically.
@@ -110,3 +110,15 @@ Real PostgreSQL tests must establish locking and transaction properties; SQLite 
 mocked repositories cannot demonstrate those guarantees. Default tests must remain
 offline and must not call paid APIs. See the [ADR](adr/0001-initial-architecture.md)
 for the scope decisions and [roadmap](../ROADMAP.md) for delivery order.
+
+## Implemented in F1-04
+
+The separate `python -m incident_desk.worker` role claims PostgreSQL jobs with row
+locks and SKIP LOCKED, bounded leases, generation fencing, and scheduled retries.
+It executes a small packaged synthetic fixture outside transactions and atomically
+publishes steps and terminal state. Success uses the existing `completed` status.
+No provider calls or autonomous tools are involved. A failed or interrupted attempt
+can repeat computation; fenced publication prevents duplicate successful results.
+A summary is stored in the final completed RunStep, with no public result API yet.
+JSON worker logs are implemented; metrics, tracing and usage accounting remain future.
+See [ADR 0004](adr/0004-worker-lifecycle.md) for states, limits and recovery semantics.
